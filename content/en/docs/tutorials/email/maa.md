@@ -298,3 +298,11 @@ Port forwarding is managed via a table which can be edited through the router in
 Here are my port forwarding rules as an example of what a setup could look like:
 
 ![](/docs/tutorials/email/port-forwarding-rules.png)
+
+## Debugging
+
+Logging for mail services (both MTA and MDA processes) is available at `/var/log/mail.log`. Use
+``` bash
+cat /var/log/mail.log | grep dovecot
+```
+to filter for `dovecot` logging.
