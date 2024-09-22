@@ -82,8 +82,8 @@ Make sure that port `12301` is free for OpenDKIM to use.
 Open `/etc/postfix/main.cf` and add the following lines if they are not already present:
 ``` text
 # The mail filter protocol version and optional protocol extensions for communication with a Milter application
-# 2 specifies that we want to use Sendmail 8 mail filter protocol version 2
-milter_protocol = 2
+# 6 specifies that we want to use Sendmail 8 mail filter protocol version 6
+milter_protocol = 6
 # The default action when a Milter (mail filter) response is unavailable (for example, bad Postfix configuration or Milter failure).
 # accept specifies that we should proceed as if the mail filter was not present.
 milter_default_action = accept
@@ -94,7 +94,7 @@ smtpd_milters = inet:localhost:12301
 non_smtpd_milters = inet:localhost:12301
 ```
 
-If `smtpd_milters` or `non_smtpd_milters` are already present and populated, add `, inet:localhost:12301` to the end of both of them. For example, if using [SpamAssassin](/docs/tutorials/email/spam) the current configuration will look like this:
+If `smtpd_milters` or `non_smtpd_milters` are already present and populated, add `, inet:localhost:12301` to the end of both of them. For example, if using [SpamAssassin](/docs/tutorials/email/spam) as a milter, the current configuration will look like this:
 ``` text
 smtpd_milters = unix:/spamass/spamass.sock
 non_smtpd_milters = unix:/spamass/spamass.sock

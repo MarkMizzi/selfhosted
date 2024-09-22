@@ -77,7 +77,7 @@ userdb {
 
 New users can be created using the usual commands for Linux:
 ``` bash
-sudo useradd -m <username> -p <password>
+sudo useradd -m <username>
 sudo usermod -L <username>
 ```
 

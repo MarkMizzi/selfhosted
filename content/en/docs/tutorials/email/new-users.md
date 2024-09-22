@@ -11,7 +11,7 @@ Creating new mail users is not straightforward with our setup, and while instruc
 
 Each mail user must have a corresponding system user; this is created using the commands:
 ``` bash
-sudo useradd -m <username> -p <password>
+sudo useradd -m <username>
 sudo usermod -L <username>
 ```
 
@@ -19,7 +19,7 @@ Users created with these commands will have a home directory to store their mail
 
 ## Creating a password
 
-For security purposes, the new mail user needs a password for their email which differs from the system password. This can be setup by running the following command:
+The new mail user needs a password to send mail and access their mailbox. This can be setup by running the following command:
 ``` bash
 printf "<mail-username>:`doveadm pw -s BLF-CRYPT -p '<password>'`\n" | sudo tee -a /usr/local/etc/passwd.replica
 ```
