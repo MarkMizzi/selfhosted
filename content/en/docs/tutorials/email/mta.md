@@ -163,3 +163,144 @@ abuse: root
 
 With this setup emails sent to `postmaster@<domain-name>`, `www@<domain-name>`, `abuse@<domain-name>`, and so on will all be routed to `root`'s mailbox.
 
+Architecturally, Postfix consists of several daemon processes which can be configured under `/etc/postfix/master.cf`. One of the processes which can (and should) be configured is an SMTP server for receiving mail; this listens on port 25 by default.
+
+Open `/etc/postfix/master.cf` and underneath
+``` text 
+# ==========================================================================
+# service type  private unpriv  chroot  wakeup  maxproc command + args
+#               (yes)   (yes)   (no)    (never) (100)
+# ==========================================================================
+```
+add the following:
+``` text
+smtp      inet  n       -       y       -       -       smtpd
+  -o syslog_name=postfix/smtp
+  -o smtpd_tls_security_level=encrypt
+```
+
+The postfix installation will probably have a similar process defined already in `/etc/postfix/master.cf` make sure to delete any duplicates.
+
+The process defined above will listen for incoming mail at port `25`, in addition we also override some options in `/etc/postfix/main.cf` using the `-o` flag:
+- `syslog_name` sets the name used when logging to `/var/log/mail.log`; we set this to something unique so we can easily filter logs if needed.
+- `smtpd_tls_security_level`: Setting this to `encrypt` means that our server will only accept incoming mail if this is sent over an encrypted (TLS) channel.
+
+### Sending mail
+
+We must define an additional process in `/etc/postfix/master.cf` for submitting mail to be sent; this listens at port `587` by default. In addition, we want to restrict who can send mail from our server to users which have mail users configured in [`dovecot`'s user database](/docs/tutorials/email/maa).
+
+We can do this by defining the following process in `/etc/postfix/master.cf`:
+
+``` text
+submission inet n - n - - smtpd
+  -o smtpd_tls_security_level=encrypt
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_sasl_type=dovecot
+  -o smtpd_sasl_path=private/auth
+  -o smtpd_sasl_security_options=noanonymous
+  -o smtpd_sasl_local_domain=$myhostname
+  -o smtpd_client_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_sender_login_maps=hash:/etc/postfix/virtual
+  -o smtpd_sender_restrictions=reject_sender_login_mismatch
+  -o smtpd_recipient_restrictions=reject_non_fqdn_recipient,reject_unknown_recipient_domain,permit_sasl_authenticated,reject
+```
+
+`dovecot` needs to be configured with an [authentication service](https://doc.dovecot.org/2.3/configuration_manual/authentication/) for `postfix` to be able to use it to authenticate clients that want to send mail; this can be done by adding
+``` text
+  unix_listener /var/spool/postfix/private/auth {
+    group = postfix
+    mode = 0660
+    user = postfix
+  }
+```
+within the `service auth {}` block in `/etc/dovecot/conf.d/10-master.conf`. Note that this only works when `postfix` and `dovecot` are running on the same machine. See [here](https://doc.dovecot.org/2.3/configuration_manual/howto/postfix_and_dovecot_sasl/#dovecot-authentication-via-tcp) for details on making this work if this is not the case for you.
+
+Make sure that `/etc/dovecot/conf.d/10-auth.conf` contains the following lines:
+``` text
+# Outlook and Windows Mail works only with LOGIN mechanism, not the standard PLAIN:
+auth_mechanisms = plain login
+```
+
+### Extra Information
+
+As mentioned above, `postfix` can be configured with many more daemon processes in `/etc/postfix/master.cf`. For an overview of the `postfix` architecture and how it uses these various daemon processes, [see here](https://www.postfix.org/OVERVIEW.html)
+
+For more about configuring `/etc/postfix/master.cf`, see [here](https://www.postfix.org/master.5.html), or run `man 5 master` on the system with your `postfix` installation.
+
+## Configuring DNS
+
+I found [this article](https://gcore.com/docs/dns/dns-records/set-up-dns-for-sending-email) helpful while writing this section.
+
+The MTA server requires certain DNS records in order to operate correctly over the Internet. These are:
+
+- An A record linking the MTA server's public IP address to a DNS name, conventionally `mail.<domain-name>` where `<domain-name>` is the domain you wish to use in your e-mail addresses.
+
+- An MX record linking `<domain-name>` to the MTA server's DNS name defined in the previous record, e.g. `mail.<domain-name>`. MX records define MTA servers associated with a particular `<domain-name>`. A particular `<domain-name>` can have more than one MX record linking to multiple MTA servers; this can be used to implement failovers.
+
+- A Sender Policy Framework (SPF) record to define which IP addresses are allowed to send mail from `<domain-name>`. This is needed in order to prevent e-mail spoofing, as by default any IP address can send mail for `<domain-name>`. Detailed information on how to configure SPF records can be found [here](https://web.archive.org/web/20150420105102/https://www.digitalocean.com/community/tutorials/how-to-use-an-spf-record-to-prevent-spoofing-improve-e-mail-reliability). A simple configuration that works is to define a TXT record for `<domain-name>` with the value `v=spf1 mx -all`; this allows mail servers linked to `<domain-name>` by MX records to send mail on behalf of `<domain-name>`, and prohibits all other IP addresses.
+
+- A [Domain-based Message Authentication, Reporting and Conformance (DMARC) record](https://www.cloudflare.com/learning/dns/dns-records/dns-dmarc-record/) determines what happens to an email after it is checked against SPF and [DKIM](/docs/tutorials/email/dkim) records. The DMARC policy determines if a check failure results in the email being marked as spam, getting blocked, or being delivered to its intended recipient. DMARC records are TXT records for `_dmarc.<domain-name>` with the content defining the intended behaviour. In our case, we will set the content to
+  ``` text
+  v=DMARC1; p=quarantine; adkim=s; aspf=s;
+  ```
+  where each of these fields means the following:
+  - `v=DMARC1` indicates that this TXT record contains a DMARC policy and should be interpreted as such by email servers.
+  - `p=quarantine` indicates that email servers should "quarantine" emails that fail DKIM and SPF: considering them to be potentially spam. Other possible settings for this include `p=none`, which allows emails that fail to still go through, and `p=reject`, which instructs email servers to block emails that fail.
+  - `adkim=s` means that DKIM checks are "strict." This can also be set to "relaxed" by changing the `s` to an `r`.
+  - `aspf=s` is the same as `adkim=s`, but for SPF.
+  For more information on configuring DMARC records, see [here](https://www.cloudflare.com/learning/dns/dns-records/dns-dmarc-record/)
+
+It is also highly recommended to set up a DKIM DNS record. See [here](/docs/tutorials/email/dkim) for more.
+
+For example, my DNS configuration on [Namecheap](https://www.namecheap.com) looks like this:
+
+![](/docs/tutorials/email/mail-dns-config.png)
+
+## Configuring SSL
+
+If you are going to use the MTA server over the internet, you will need to generate a certificate for it.
+
+Administrators can easily generate a certificate using [`certbot`](https://certbot.eff.org); this uses the [Let's Encrypt CA](https://letsencrypt.org):
+``` bash
+sudo certbot certonly --manual --preferred-challenges dns -d mail.<domain-name> --email <admin-email> --agree-tos
+```
+
+Certbot will prompt you to enter a DNS TXT record in order to confirm that the domain belongs to you; follow the instructions and wait a few minutes before pressing Enter, as it will take a while for the DNS changes to propagate. Once the challenge has succeeded, `certbot` will indicate that a certificate and a key have been generated and are available at some location. For example, for me, it showed these details:
+``` text
+Successfully received certificate.
+Certificate is saved at: /etc/letsencrypt/live/mail.markmizzi.dev/fullchain.pem
+Key is saved at:         /etc/letsencrypt/live/mail.markmizzi.dev/privkey.pem
+This certificate expires on 2024-12-18.
+These files will be updated when the certificate renews.
+
+NEXT STEPS:
+- This certificate will not be renewed automatically. Autorenewal of --manual certificates requires the use of an authentication hook script (--manual-auth-hook) but one was not provided. To renew this certificate, repeat this same certbot command before the certificate's expiry date.
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+If you like Certbot, please consider supporting our work by:
+ * Donating to ISRG / Let's Encrypt:   https://letsencrypt.org/donate
+ * Donating to EFF:                    https://eff.org/donate-le
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+```
+Note the certificate expiration date; certificates must be renewed using the `certbot` command shown above. Certbot will send an e-mail reminder to `<admin-email>` when the certificate has almost expired.
+
+Tell `postfix` about the generated key and certificate by modifying these parameters in `/etc/postfix/main.cf` with the details returned by Certbot:
+``` text
+# TLS parameters
+smtpd_tls_cert_file=<location-of-certificate>
+smtpd_tls_key_file=<location-of-private-key>
+```
+
+## Port forwarding on the router
+
+Port forwarding rules are required to use an SMTP server over the Internet. We need to expose two ports; port `25` for receiving mail, and port `587` for sending it.
+
+Port forwarding is usually managed via a table which can be edited through the router interface (this is usually available by accessing the largest local IP address on your local network, e.g. for me it is available at `http://192.168.1.254`). 
+
+Here are my port forwarding rules as an example of how a setup could look:
+
+![](/docs/tutorials/email/port-forwarding-rules.png)
+
+## Debugging
+
+Logging for mail services (both MTA and MDA processes) is available at `/var/log/mail.log`. This file will also contain logging from milter programs registered with `postfix`.
