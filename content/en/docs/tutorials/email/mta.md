@@ -182,30 +182,61 @@ smtp      inet  n       -       y       -       -       smtpd
 The postfix installation will probably have a similar process defined already in `/etc/postfix/master.cf` make sure to delete any duplicates.
 
 The process defined above will listen for incoming mail at port `25`, in addition we also override some options in `/etc/postfix/main.cf` using the `-o` flag:
-- `syslog_name` sets the name used when logging to `/var/log/mail.log`; we set this to something unique so we can easily filter logs if needed.
-- `smtpd_tls_security_level`: Setting this to `encrypt` means that our server will only accept incoming mail if this is sent over an encrypted (TLS) channel.
+- [`syslog_name`](http://www.postfix.org/postconf.5.html#syslog_name) sets the name used when logging to `/var/log/mail.log`; we set this to something unique so we can easily filter logs if needed.
+- [`smtpd_tls_security_level`](http://www.postfix.org/postconf.5.html#smtpd_tls_security_level): Setting this to `encrypt` means that our server will only accept incoming mail if this is sent over an encrypted (TLS) channel.
 
 ### Sending mail
 
 We must define an additional process in `/etc/postfix/master.cf` for submitting mail to be sent; this listens at port `587` by default. In addition, we want to restrict who can send mail from our server to users which have mail users configured in [`dovecot`'s user database](/docs/tutorials/email/maa).
 
 We can do this by defining the following process in `/etc/postfix/master.cf`:
-
 ``` text
 submission inet n - n - - smtpd
+  -o syslog_name=postfix/submission
   -o smtpd_tls_security_level=encrypt
   -o smtpd_sasl_auth_enable=yes
   -o smtpd_sasl_type=dovecot
   -o smtpd_sasl_path=private/auth
   -o smtpd_sasl_security_options=noanonymous
-  -o smtpd_sasl_local_domain=$myhostname
   -o smtpd_client_restrictions=permit_sasl_authenticated,reject
-  -o smtpd_sender_login_maps=hash:/etc/postfix/virtual
-  -o smtpd_sender_restrictions=reject_sender_login_mismatch
+  -o smtpd_sender_restrictions=reject_authenticated_sender_login_mismatch
+  -o smtpd_sender_login_maps=hash:/etc/postfix/sender_login
   -o smtpd_recipient_restrictions=reject_non_fqdn_recipient,reject_unknown_recipient_domain,permit_sasl_authenticated,reject
 ```
 
-`dovecot` needs to be configured with an [authentication service](https://doc.dovecot.org/2.3/configuration_manual/authentication/) for `postfix` to be able to use it to authenticate clients that want to send mail; this can be done by adding
+The new options used and their meanings are:
+- [`smtpd_sasl_auth_enable`](http://www.postfix.org/postconf.5.html#smtpd_sasl_auth_enable) enables SASL; this is a generic autentication framework used to authenticate users sending mail with SMTP.
+
+- [`smtpd_sasl_type`](http://www.postfix.org/postconf.5.html#smtpd_sasl_type) specifies the SASL plug in that the `postfix` SMTP server should use for authentication. In our case we will use `dovecot`'s user database to provide authentication, and hence we specify `dovecot` as the plugin.
+
+- [`smtpd_sasl_path`](http://www.postfix.org/postconf.5.html#smtpd_sasl_path) contains some implementation-specific information that the `postfix` SMTP server passes to the SASL plugin; in our case it is a path to a local file that will also be specified in the `dovecot` configuration (see below). The SMTP server and the SASL provider (in our case `dovecot`) can use this file to communicate any configuration information.
+
+- [`smtpd_sasl_security_options`](http://www.postfix.org/postconf.5.html#smtpd_sasl_security_options) determines SASL security options. In our case we set [`noanonymous`](https://docs.oracle.com/cd/E19476-01/821-0510/def-anonymous-sasl-mechanism.html) to disable unauthenticated clients that can send mail as "guests".
+
+- [`smtpd_client_restrictions`](http://www.postfix.org/postconf.5.html#smtpd_client_restrictions) specify a list of optional restructions that the SMTP server applies in the context of a client connection request. In our case we set `permit_sasl_authenticated,reject` which allows SASL authenticated clients and rejects all other client connections.
+
+- [`smtpd_sender_restrictions`](http://www.postfix.org/postconf.5.html#smtpd_sender_restrictions) specifies optional restrictions that the Postfix SMTP server applies in the context of a client `MAIL FROM` command. In our case we enable `reject_authenticated_sender_login_mismatch` which ensures that the email address given in the `MAIL FROM` command is owned by the mail user sending the email.
+
+- [`smtpd_sender_login_maps`](http://www.postfix.org/postconf.5.html#smtpd_sender_login_maps) is a set of optional lookup tables with the SASL login names that own `MAIL FROM` addresses. We specify `hash:/etc/postfix/sender_login`, meaning that the file `/etc/postfix/sender_login` is used as a lookup table. You must create this file and put inside it one line for each email address and each mail user such that the mail user can send emails with `MAIL FROM` set to that email address in the following format:
+  ``` text
+  <email-address> <mail-username>
+  ```
+  For example my `/etc/postfix/sender_login` file contains the following:
+  ```  text
+  mark@markmizzi.dev mark
+  root@markmizzi.dev root
+  postmaster@markmizzi.dev root
+  noreply@markmizzi.dev noreply
+  ```
+  `postfix` uses an [indexed version](https://www.postfix.org/DATABASE_README.html#types) of this file, which must be created using
+  ``` bash
+  sudo postmap hash:/etc/postfix/sender_login
+  ```
+  Re-run this command every time you change `/etc/postfix/sender_login`.
+
+- [`smtpd_recipient_restrictions`](http://www.postfix.org/postconf.5.html#smtpd_recipient_restrictions) species optional restrictions that the Postfix SMTP server applies in the context of a client `RCPT TO` command. In our case we don't allow clients to send mail to email addresses that (1) do not have a fully qualified domain name (`reject_non_fqdn_recipient`), (2) that have a domain with an unknown mail server, i.e. no valid MX or A DNS records for a mail server (`reject_unknown_recipient_domain`), and (3) we allow the request when the client is SASL authenticated (`permit_sasl_authenticated`).
+
+`dovecot` needs to be configured with an [authentication service](https://doc.dovecot.org/2.3/configuration_manual/authentication/) for `postfix` to be able to use it to authenticate clients that want to send mail with SASL; this can be done by adding
 ``` text
   unix_listener /var/spool/postfix/private/auth {
     group = postfix
