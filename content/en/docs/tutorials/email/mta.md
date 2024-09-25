@@ -328,9 +328,9 @@ Port forwarding rules are required to use an SMTP server over the Internet. We n
 
 Port forwarding is usually managed via a table which can be edited through the router interface (this is usually available by accessing the largest local IP address on your local network, e.g. for me it is available at `http://192.168.1.254`). 
 
-Here are my port forwarding rules as an example of how a setup could look:
+Here are my port forwarding rules as an example of what a setup could look like:
 
-![](/docs/tutorials/email/port-forwarding-rules.png)
+![](/docs/tutorials/email/mta-port-forwarding-rules.png)
 
 ## Debugging
 
