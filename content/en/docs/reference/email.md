@@ -1,7 +1,8 @@
 ---
 title: How email works
 description: Reference material about the internal workings of email systems.
-weight: 1
+weight: 10
+status: draft
 ---
 
 # Mail system architecture
