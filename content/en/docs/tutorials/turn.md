@@ -178,5 +178,5 @@ user=<username2>:<password2>
 
 ## Additional resources
 
-[What is TURN? | Cloudflare](https://developers.cloudflare.com/calls/turn/what-is-turn/)
-[RFC 8656: TURN | IETF](https://datatracker.ietf.org/doc/html/rfc8656)
+- [What is TURN? | Cloudflare](https://developers.cloudflare.com/calls/turn/what-is-turn/)
+- [RFC 8656: TURN | IETF](https://datatracker.ietf.org/doc/html/rfc8656)
